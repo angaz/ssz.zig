@@ -207,7 +207,7 @@ pub fn serialize(comptime T: type, data: T, l: *ArrayList(u8)) !void {
 /// Takes a byte array containing the serialized payload of type `T` (with
 /// possible trailing data) and deserializes it into the `T` object pointed
 /// at by `out`.
-pub fn deserialize(comptime T: type, serialized: []const u8, out: *T) !void {
+pub fn deserialize(comptime T: type, serialized: []const u8, out: *T) !usize {
     const info = @typeInfo(T);
     switch (info) {
         .Array => {
@@ -221,6 +221,8 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T) !void {
                         b >>= 1;
                     }
                 }
+
+                return out.len;
             } else {
                 const U = info.Array.child;
                 if (try isFixedSizeObject(U)) {
@@ -229,6 +231,8 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T) !void {
                     inline while (i < out.len) : (i += pitch) {
                         try deserialize(U, serialized[i * pitch .. (i + 1) * pitch], &out[i]);
                     }
+
+                    return out.len;
                 } else {
                     // first variable index is also the size of the list
                     // of indices. Recast that list as a []const u32.
@@ -241,15 +245,22 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T) !void {
                         if (start >= serialized.len or end > serialized.len) {
                             return error.IndexOutOfBounds;
                         }
-                        try deserialize(U, serialized[start..end], &out[i]);
+                        return try deserialize(U, serialized[start..end], &out[i]);
                     }
+
+                    return i * size;
                 }
             }
         },
-        .Bool => out.* = (serialized[0] == 1),
+        .Bool => {
+            out.* = (serialized[0] == 1);
+            return 1;
+        },
         .Int => {
             const N = @sizeOf(T);
             out.* = std.mem.readInt(T, serialized[0..N], .little);
+
+            return N;
         },
         .Optional => {
             const index: u8 = serialized[0];
@@ -333,6 +344,8 @@ pub fn deserialize(comptime T: type, serialized: []const u8, out: *T) !void {
         },
         else => return error.NotImplemented,
     }
+
+    return 0;
 }
 
 fn mixInLength(root: [32]u8, length: [32]u8, out: *[32]u8) void {
